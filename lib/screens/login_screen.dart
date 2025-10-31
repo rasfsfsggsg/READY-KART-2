@@ -3,10 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'home.dart';
 import 'navigation/forgot_password_screen.dart';
 import 'register_screen.dart';
+import 'privacy/privacy_policy.dart';
+import 'privacy/terms_conditions.dart';
+import 'privacy/refund_policy.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -23,19 +27,49 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool isPasswordVisible = false;
   bool rememberMe = false;
+  bool isDarkMode = true;
   String? errorMessage;
   bool isPasswordError = false;
   bool isLoading = false;
+  double passwordStrength = 0.0;
 
   @override
-  void dispose() {
-    emailOrPhoneController.dispose();
-    passwordController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _checkAutoLogin();
+  }
+
+  // ✅ Auto login if saved credentials
+  Future<void> _checkAutoLogin() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedEmail = prefs.getString('savedEmail');
+    final savedPassword = prefs.getString('savedPassword');
+    if (savedEmail != null && savedPassword != null) {
+      emailOrPhoneController.text = savedEmail;
+      passwordController.text = savedPassword;
+      rememberMe = true;
+      await loginUser(autoLogin: true);
+    }
+  }
+
+  // 🧠 Password Strength Logic
+  void checkPasswordStrength(String value) {
+    double strength = 0;
+    if (value.isEmpty) {
+      strength = 0;
+    } else if (value.length < 6) {
+      strength = 0.25;
+    } else if (value.contains(RegExp(r'[A-Z]')) &&
+        value.contains(RegExp(r'[0-9]'))) {
+      strength = 0.75;
+    } else {
+      strength = 0.5;
+    }
+    setState(() => passwordStrength = strength);
   }
 
   // 🔐 Login Logic
-  Future<void> loginUser() async {
+  Future<void> loginUser({bool autoLogin = false}) async {
     final identifier = emailOrPhoneController.text.trim();
     final password = passwordController.text.trim();
 
@@ -45,10 +79,12 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     if (identifier.isEmpty || password.isEmpty) {
-      setState(
-        () => errorMessage =
-            'Please enter both identifier (email or phone) and password.',
-      );
+      if (!autoLogin) {
+        setState(() {
+          errorMessage =
+              'Please enter both identifier (email or phone) and password.';
+        });
+      }
       return;
     }
 
@@ -106,6 +142,12 @@ class _LoginScreenState extends State<LoginScreen> {
         email: loginEmail,
         password: password,
       );
+
+      if (rememberMe) {
+        final prefs = await SharedPreferences.getInstance();
+        prefs.setString('savedEmail', identifier);
+        prefs.setString('savedPassword', password);
+      }
 
       Fluttertoast.showToast(
         msg: 'Login successful!',
@@ -205,7 +247,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // ✏️ Reusable Input Field
+  // ✏️ Input Field Builder
   Widget buildInput({
     required String label,
     required IconData icon,
@@ -216,17 +258,21 @@ class _LoginScreenState extends State<LoginScreen> {
     return TextField(
       controller: controller,
       obscureText: password && !isPasswordVisible,
+      onChanged: password ? checkPasswordStrength : null,
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
         prefixIcon: Icon(icon, color: Colors.cyanAccent),
         suffixIcon: password
-            ? IconButton(
-                icon: Icon(
-                  isPasswordVisible ? Icons.visibility : Icons.visibility_off,
-                  color: Colors.cyanAccent,
+            ? Tooltip(
+                message: isPasswordVisible ? 'Hide Password' : 'Show Password',
+                child: IconButton(
+                  icon: Icon(
+                    isPasswordVisible ? Icons.visibility : Icons.visibility_off,
+                    color: Colors.cyanAccent,
+                  ),
+                  onPressed: () =>
+                      setState(() => isPasswordVisible = !isPasswordVisible),
                 ),
-                onPressed: () =>
-                    setState(() => isPasswordVisible = !isPasswordVisible),
               )
             : null,
         labelText: label,
@@ -236,21 +282,87 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         filled: true,
         fillColor: Colors.white.withOpacity(0.05),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(
-            color: error ? Colors.red : Colors.white.withOpacity(0.3),
-          ),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(
-            color: error ? Colors.red : Colors.white.withOpacity(0.3),
-          ),
+          borderSide: BorderSide(color: error ? Colors.red : Colors.white30),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: error ? Colors.red : Colors.cyanAccent),
+          borderSide: BorderSide(
+            color: error ? Colors.red : Colors.cyanAccent,
+            width: 1.5,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 🌈 Password Strength Bar
+  Widget buildPasswordStrengthBar() {
+    if (passwordStrength == 0) return const SizedBox.shrink();
+    Color color;
+    String text;
+    if (passwordStrength <= 0.25) {
+      color = Colors.red;
+      text = 'Weak';
+    } else if (passwordStrength <= 0.5) {
+      color = Colors.orange;
+      text = 'Medium';
+    } else {
+      color = Colors.green;
+      text = 'Strong';
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: LinearProgressIndicator(
+              value: passwordStrength,
+              color: color,
+              backgroundColor: Colors.white24,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(text, style: TextStyle(color: color, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+
+  // 🧩 Active UI Policy Link
+  Widget policyLink(String title, Widget page) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () =>
+            Navigator.push(context, MaterialPageRoute(builder: (_) => page)),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.cyanAccent.withOpacity(0.5)),
+            color: Colors.cyanAccent.withOpacity(0.05),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.policy_outlined,
+                color: Colors.cyanAccent,
+                size: 16,
+              ),
+              const SizedBox(width: 5),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.cyanAccent,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -258,10 +370,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final isMobile = size.width < 600;
+    final isMobile = MediaQuery.of(context).size.width < 600;
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
@@ -273,207 +385,184 @@ class _LoginScreenState extends State<LoginScreen> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 500),
-            child: Container(
-              margin: const EdgeInsets.all(24),
-              padding: const EdgeInsets.all(32),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white.withOpacity(0.2)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.5),
-                    blurRadius: 25,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset('assets/logo.png', height: 100),
+                  const SizedBox(height: 16),
+                  Text(
+                    "Welcome Back",
+                    style: TextStyle(
+                      color: Colors.cyanAccent,
+                      fontSize: isMobile ? 26 : 30,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ],
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // 🖼️ Logo or Title
-                    Image.asset('assets/logo.png', height: 100),
-                    const SizedBox(height: 20),
-                    Text(
-                      "Welcome Back",
-                      style: TextStyle(
-                        color: Colors.cyanAccent,
-                        fontSize: isMobile ? 26 : 30,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      "Login to your account",
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 14,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 30),
+                  const SizedBox(height: 6),
+                  const Text(
+                    "Login to your account",
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 30),
 
-                    buildInput(
-                      label: "Email or Mobile (10 digits)",
-                      icon: Icons.person,
-                      controller: emailOrPhoneController,
-                    ),
-                    const SizedBox(height: 18),
-                    buildInput(
-                      label: "Password",
-                      icon: Icons.lock,
-                      controller: passwordController,
-                      password: true,
-                      error: isPasswordError,
-                    ),
+                  buildInput(
+                    label: "Email or Mobile (10 digits)",
+                    icon: Icons.person,
+                    controller: emailOrPhoneController,
+                  ),
+                  const SizedBox(height: 18),
+                  buildInput(
+                    label: "Password",
+                    icon: Icons.lock,
+                    controller: passwordController,
+                    password: true,
+                    error: isPasswordError,
+                  ),
+                  buildPasswordStrengthBar(),
 
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            Checkbox(
-                              value: rememberMe,
-                              onChanged: (v) =>
-                                  setState(() => rememberMe = v ?? false),
-                              activeColor: Colors.cyanAccent,
-                            ),
-                            const Text(
-                              "Remember me",
-                              style: TextStyle(color: Colors.white70),
-                            ),
-                          ],
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ForgotPasswordScreen(),
-                              ),
-                            );
-                          },
-                          child: const Text(
-                            "Forgot Password?",
-                            style: TextStyle(
-                              color: Colors.cyanAccent,
-                              fontSize: 13,
-                            ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: rememberMe,
+                            onChanged: (v) =>
+                                setState(() => rememberMe = v ?? false),
+                            activeColor: Colors.cyanAccent,
                           ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 15),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton(
-                        onPressed: isLoading ? null : loginUser,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.cyanAccent,
-                          foregroundColor: Colors.black,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
+                          const Text(
+                            "Remember me",
+                            style: TextStyle(color: Colors.white70),
                           ),
-                        ),
-                        child: isLoading
-                            ? const CircularProgressIndicator(
-                                color: Colors.black,
-                              )
-                            : const Text(
-                                "LOGIN",
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
+                        ],
                       ),
-                    ),
-
-                    if (errorMessage != null) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        errorMessage!,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.redAccent,
-                          fontSize: 14,
+                      TextButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ForgotPasswordScreen(),
+                            ),
+                          );
+                        },
+                        child: const Text(
+                          "Forgot Password?",
+                          style: TextStyle(
+                            color: Colors.cyanAccent,
+                            fontSize: 13,
+                          ),
                         ),
                       ),
                     ],
+                  ),
 
-                    const SizedBox(height: 25),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Divider(color: Colors.white.withOpacity(0.3)),
-                        ),
-                        const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 8),
-                          child: Text(
-                            "or",
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                        ),
-                        Expanded(
-                          child: Divider(color: Colors.white.withOpacity(0.3)),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 25),
-                    OutlinedButton.icon(
-                      onPressed: signInWithGoogle,
-                      icon: Image.asset('assets/google.png', height: 22),
-                      label: const Text(
-                        "Continue with Google",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 16,
-                        ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        backgroundColor: Colors.white.withOpacity(0.05),
-                        side: BorderSide(color: Colors.white.withOpacity(0.2)),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
+                  const SizedBox(height: 15),
+                  ElevatedButton(
+                    onPressed: isLoading ? null : loginUser,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.cyanAccent,
+                      foregroundColor: Colors.black,
+                      minimumSize: const Size(double.infinity, 48),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-
-                    const SizedBox(height: 35),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Text(
-                          "Don’t have an account? ",
-                          style: TextStyle(color: Colors.white70),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.pushReplacement(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const RegisterScreen(),
-                              ),
-                            );
-                          },
-                          child: const Text(
-                            "Sign Up",
+                    child: isLoading
+                        ? const CircularProgressIndicator(color: Colors.black)
+                        : const Text(
+                            "LOGIN",
                             style: TextStyle(
-                              color: Colors.cyanAccent,
                               fontWeight: FontWeight.bold,
+                              fontSize: 16,
                             ),
                           ),
-                        ),
-                      ],
+                  ),
+
+                  if (errorMessage != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      errorMessage!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.redAccent,
+                        fontSize: 14,
+                      ),
                     ),
                   ],
-                ),
+
+                  const SizedBox(height: 25),
+                  const Divider(color: Colors.white30),
+                  const SizedBox(height: 20),
+
+                  OutlinedButton.icon(
+                    onPressed: signInWithGoogle,
+                    icon: Image.asset('assets/google.png', height: 22),
+                    label: const Text(
+                      "Continue with Google",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
+                      ),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      backgroundColor: Colors.white.withOpacity(0.05),
+                      side: const BorderSide(color: Colors.white24),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 35),
+
+                  // 🌟 ACTIVE POLICY LINKS
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 10,
+                    runSpacing: 8,
+                    children: [
+                      policyLink("Privacy Policy", const PrivacyPolicyPage()),
+                      policyLink(
+                        "Terms & Conditions",
+                        const TermsConditionsPage(),
+                      ),
+                      policyLink("Refund Policy", const RefundPolicyPage()),
+                    ],
+                  ),
+
+                  const SizedBox(height: 30),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        "Don’t have an account? ",
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const RegisterScreen(),
+                            ),
+                          );
+                        },
+                        child: const Text(
+                          "Sign Up",
+                          style: TextStyle(
+                            color: Colors.cyanAccent,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ),
