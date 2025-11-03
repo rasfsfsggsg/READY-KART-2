@@ -1,0 +1,1 @@
+ C:\\Users\\ksale\\ready_cart\\.dart_tool\\flutter_build\\cd8be37afa61e1c964e47c48aa379253\\native_assets.json: 
